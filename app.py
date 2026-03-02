@@ -171,16 +171,37 @@ def apply_theme():
         .sb-hdr   { font-size:10px; font-weight:800; color:rgba(255,255,255,0.45);
                     margin:16px 0 8px; text-transform:uppercase; letter-spacing:1.5px; padding:0 16px; }
         .sb-div   { height:1px; background:rgba(255,255,255,0.08); margin:12px 8px; }
-        .ann-box  { background:rgba(255,255,255,0.06); border-left:4px solid #F97316;
-                    padding:8px 12px; border-radius:6px; margin:4px 0;
-                    font-size:12px; color:rgba(255,255,255,0.85); line-height:1.5; }
+        .ann-box  { 
+        background:#FFFFFF;
+        border-left:4px solid #F97316;
+        padding:8px 12px;
+        border-radius:6px;
+        margin:4px 0;
+        font-size:12px;
+        color:#1E293B;
+        line-height:1.5;
+}
         .filter-badge { display:inline-block; background:rgba(249,115,22,0.15);
             border:1px solid #F97316; color:#FDBA74 !important; border-radius:20px;
             padding:2px 10px; font-size:11px; font-weight:700; margin:2px; }
-        section[data-testid="stSidebar"] label,
-        section[data-testid="stSidebar"] p,
-        section[data-testid="stSidebar"] span,
-        section[data-testid="stSidebar"] div { color:rgba(255,255,255,0.85) !important; }
+                /* Sidebar headers stay white */
+        .sb-hdr,
+        .sb-title,
+        .sb-sub {
+            color: #FFFFFF !important;
+        }
+
+        /* Form labels inside expander (light mode) */
+        section[data-testid="stSidebar"] .stTextInput label,
+        section[data-testid="stSidebar"] .stTextArea label {
+            color: #FFFFFF !important;
+        }
+
+        /* Expander content text */
+        section[data-testid="stSidebar"] .stExpander p,
+        section[data-testid="stSidebar"] .stExpander span {
+            color: #FFFFFF !important;
+        }
         header[data-testid="stHeader"] {
             background-color:#fff !important; border-bottom:1px solid #E2E8F0 !important; }
         header[data-testid="stHeader"] button svg,

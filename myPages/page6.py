@@ -640,6 +640,12 @@ def run(filtered: dict):
             color: #94A3B8 !important;
             opacity: 1 !important;
         }}
+         /* ── FIX SLIDER LABEL VISIBILITY ── */
+        div[data-testid="stSlider"] label,
+        div[data-testid="stSlider"] span {{
+            color: {text_color} !important;
+            font-weight: 700 !important;
+        }}
     </style>""", unsafe_allow_html=True)
 
     st.markdown("<div class='pg-title'>Intelligence & Capacity Planning</div>", unsafe_allow_html=True)
