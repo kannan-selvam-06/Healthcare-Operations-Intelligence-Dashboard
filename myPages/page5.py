@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-def run():
+def run(filtered: dict):
     dark_mode = st.session_state.get('dark_mode', False)
 
     if dark_mode:
@@ -81,24 +81,22 @@ def run():
     st.markdown("<div class='page-title'>Staffing & Resource Optimization</div>", unsafe_allow_html=True)
     st.markdown("<div class='page-subtitle'>Strategic workforce analytics and resource allocation insights for optimal healthcare delivery</div>", unsafe_allow_html=True)
 
-    @st.cache_data
-    def load_data():
-        xls = pd.ExcelFile("data/dataFinal.xlsx")
-        return {sheet: pd.read_excel(xls, sheet) for sheet in xls.sheet_names}
+    # ── Unpack pre-filtered data ─────────────────────────────────────────────
+    patients     = filtered["patients"]
+    appointments = filtered["appointments"]
+    bed_records  = filtered["bed_records"]
+    doctor       = filtered["doctors"]
+    department   = filtered["departments"]
+    nurse        = filtered["nurses"]
 
-    tables = load_data()
-
-    patients     = tables["Patients"]
-    appointments = tables["Appointment"]
-    bed_records  = tables["BedRecords"]
-    doctor       = tables["Doctor"]
-    department   = tables["Department"]
-    nurse        = tables["Nurse"]
-
-    appointments["appointment_Date"] = pd.to_datetime(appointments["appointment_Date"])
-    bed_records["admission_Date"]    = pd.to_datetime(bed_records["admission_Date"])
+    if appointments.empty:
+        st.warning("No appointment data matches the current global filters.")
+        return
 
     doctor_dept  = doctor.merge(department, on="dept_Id", how="left")
+    # Drop dept_Name/FName already added by load_all to avoid _x/_y suffix conflicts
+    appointments = appointments.drop(
+        columns=[c for c in ["dept_Name", "FName"] if c in appointments.columns], errors="ignore")
     appointments = appointments.merge(
         doctor_dept[["doct_Id","dept_Name","FName"]], on="doct_Id", how="left"
     )
@@ -107,7 +105,6 @@ def run():
     nurse_count  = nurse_dept.groupby("dept_Name")["nurse_Id"].nunique().reset_index()
     nurse_count.columns = ["dept_Name","nurse_Id"]
 
-    # Use full unfiltered data — filters removed per user request
     appointments_f = appointments.copy()
     patients_f     = patients.copy()
     bed_f          = bed_records.copy()
@@ -125,28 +122,53 @@ def run():
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br><br>", unsafe_allow_html=True)
+
+    # ── Cross-filter state ────────────────────────────────────────────────────
+    # Trigger: Nurse Distribution bar → filters Doctor Heatmap, Ratio, Admissions vs Staff
+    if "p5_cf_dept" not in st.session_state:
+        st.session_state["p5_cf_dept"] = None
+    cf_dept = st.session_state["p5_cf_dept"]
+
+    def _cf(df_in, col="dept_Name"):
+        if cf_dept is None or col not in df_in.columns:
+            return df_in
+        return df_in[df_in[col] == cf_dept]
+
+    if cf_dept:
+        bc1, bc2 = st.columns([6, 1])
+        with bc1:
+            st.markdown(f"""<div class='insight-box'>
+                 <b>Cross-filtering by department: {cf_dept}</b>
+                — Doctor Heatmap, Nurse Ratio and Admissions vs Staff updated
+            </div>""", unsafe_allow_html=True)
+        with bc2:
+            if st.button("✕ Clear", key="p5_cf_clear"):
+                st.session_state["p5_cf_dept"] = None
+                st.rerun()
+
     # Quick insight cards REMOVED per user request
 
-    # ── Nurse Distribution ────────────────────────────────────────────────────
+    # ── Nurse Distribution — CROSS-FILTER TRIGGER ────────────────────────────
     st.markdown("<div class='section-header'>Nurse Distribution by Department</div>", unsafe_allow_html=True)
+    st.caption("Click any bar to cross-filter Doctor Heatmap, Nurse Ratio and Admissions charts.")
 
     nurse_count_sorted = nurse_count.sort_values("nurse_Id", ascending=True)
+    bar_colors_nurse = [CORAL if (cf_dept and d == cf_dept) else None for d in nurse_count_sorted['dept_Name']]
+    # Use colorscale when no selection, solid CORAL for selected
+    use_colorscale = cf_dept is None
 
     nd1, nd2 = st.columns([3, 1], gap="large")
     with nd1:
+        final_colors = [CORAL if (cf_dept and d == cf_dept) else (SUCCESS_GREEN if i < len(nurse_count_sorted)//2 else PRIMARY_BLUE)
+                        for i, d in enumerate(nurse_count_sorted['dept_Name'])]
         fig1 = go.Figure()
         fig1.add_trace(go.Bar(
             x=nurse_count_sorted['nurse_Id'],
             y=nurse_count_sorted['dept_Name'],
             orientation='h',
-            marker=dict(
-                color=nurse_count_sorted['nurse_Id'],
-                colorscale=[[0, SUCCESS_GREEN],[1, PRIMARY_BLUE]],
-                line=dict(color='white', width=2), cornerradius=8
-            ),
-            hovertemplate='<b>%{y}</b><br>Nurses: %{x}<extra></extra>'
+            marker=dict(color=final_colors, line=dict(color='white', width=2), cornerradius=8),
+            hovertemplate='<b>%{y}</b><br>Nurses: %{x}<br><i>Click to cross-filter</i><extra></extra>'
         ))
-        # Title removed from chart — section header above serves as title
         fig1.update_layout(
             xaxis_title="<b>Number of Nurses</b>", yaxis_title="",
             xaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT, showgrid=True, gridcolor=GRID_COLOR),
@@ -154,7 +176,18 @@ def run():
             height=500, margin=dict(l=20, r=20, t=20, b=50),
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', showlegend=False
         )
-        st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
+        # ── Cross-filter event capture ─────────────────────────────────────
+        event1 = st.plotly_chart(
+            fig1, use_container_width=True,
+            config={'displayModeBar': False},
+            on_select="rerun",
+            key="p5_nurse_chart"
+        )
+        if event1 and event1.selection and event1.selection.points:
+            clicked_dept = event1.selection.points[0].get("y")
+            if clicked_dept and clicked_dept != st.session_state.get("p5_cf_dept"):
+                st.session_state["p5_cf_dept"] = clicked_dept
+                st.rerun()
     with nd2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         top_nd  = nurse_count_sorted.iloc[-1]
@@ -173,10 +206,11 @@ def run():
             <div class='insight-text'>{avg_nur} nurses on average per department.</div>
         </div>""", unsafe_allow_html=True)
 
-    # ── Doctor Workload Heatmap ───────────────────────────────────────────────
+    # ── Doctor Workload Heatmap (reacts to cross-filter) ─────────────────────
     st.markdown("<div class='section-header'>Doctor Workload Heatmap (Top 10)</div>", unsafe_allow_html=True)
 
-    doctor_workload = appointments_f.groupby(["Doctor_Name","dept_Name"]).size().reset_index(name="Appointments")
+    appts_cf = _cf(appointments_f)
+    doctor_workload = appts_cf.groupby(["Doctor_Name","dept_Name"]).size().reset_index(name="Appointments")
     top10_doctors   = doctor_workload.groupby("Doctor_Name")["Appointments"].sum().sort_values(ascending=False).head(10).index
     heatmap_df      = doctor_workload[doctor_workload["Doctor_Name"].isin(top10_doctors)]
     pivot_heatmap   = heatmap_df.pivot(index="Doctor_Name", columns="dept_Name", values="Appointments").fillna(0)
@@ -210,11 +244,12 @@ def run():
     else:
         st.info("No data available for Doctor Workload Heatmap.")
 
-    # ── Patient-to-Nurse Ratio ────────────────────────────────────────────────
+    # ── Patient-to-Nurse Ratio (reacts to cross-filter) ──────────────────────
     st.markdown("<div class='section-header'>Patient-to-Nurse Ratio</div>", unsafe_allow_html=True)
 
-    admissions_dept = bed_f.merge(
-        appointments_f[["patient_Id","dept_Name"]].drop_duplicates(), on="patient_Id", how="left"
+    bed_cf = _cf(bed_f)
+    admissions_dept = bed_cf.merge(
+        appts_cf[["patient_Id","dept_Name"]].drop_duplicates(), on="patient_Id", how="left"
     ).groupby("dept_Name").size().reset_index(name="Total_Admissions")
 
     ratio_df = admissions_dept.merge(nurse_count, on="dept_Name", how="left")

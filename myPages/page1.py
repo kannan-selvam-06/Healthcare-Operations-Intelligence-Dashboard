@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-def run():
+def run(filtered: dict):
     dark_mode = st.session_state.get('dark_mode', False)
 
     if dark_mode:
@@ -31,10 +31,8 @@ def run():
         bdr            = '#E2E8F0'
         highlight_bg   = '#EFF6FF'
 
-    EXCEL_PATH  = "data/dataFinal.xlsx"
     MONTH_ORDER = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     YEAR_COLORS = {2024: SECONDARY_BLUE, 2025: CORAL}
-
     TICK_FONT  = dict(size=14, color=text_color, family="Arial Black")
     TITLE_FONT = dict(size=16, color=text_color, family="Arial Black")
     GRID_COLOR = 'rgba(128,128,128,0.2)'
@@ -86,48 +84,92 @@ def run():
             border-radius: 20px; padding: 4px 14px; margin: 4px;
             font-size: 13px; font-weight: 700; color: {text_color};
         }}
+        .cf-banner {{
+            background: linear-gradient(90deg, rgba(249,115,22,0.15), rgba(249,115,22,0.05));
+            border: 1px solid rgba(249,115,22,0.4); border-left: 4px solid #F97316;
+            border-radius: 10px; padding: 10px 18px; margin-bottom: 18px;
+            display: flex; align-items: center; gap: 12px;
+        }}
+        .cf-banner-text {{
+            font-size: 14px; font-weight: 700; color: {text_color};
+        }}
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown("<div class='page-title'>Healthcare Operations Intelligence Dashboard</div>", unsafe_allow_html=True)
     st.markdown("<div class='page-subtitle'>Real-time Operational Intelligence & Strategic Insights</div>", unsafe_allow_html=True)
 
-    @st.cache_data
-    def load_healthcare_data(path):
-        sheets = pd.read_excel(path, sheet_name=None)
-        sheets = {k.strip().lower(): v for k, v in sheets.items()}
-        dfs = [sheets[name].copy() for name in ["patients","appointment","surgeryrecord","roomrecords","room","bedrecords","department"]]
-        for df in dfs:
-            df.columns = df.columns.str.strip().str.lower()
-        if "appointment_date" in dfs[1].columns:
-            dfs[1]["appointment_date"] = pd.to_datetime(dfs[1]["appointment_date"], errors="coerce")
-        if "admission_date" in dfs[3].columns:
-            dfs[3]["admission_date"] = pd.to_datetime(dfs[3]["admission_date"], errors="coerce")
-        return dfs
+    # ── Unpack pre-filtered data ──────────────────────────────────────────────
+    pts       = filtered["patients"]
+    apps_f    = filtered["appts_lc"]
+    room_recs = filtered["room_records_lc"]
+    rooms     = filtered["rooms_lc"]
+    bed       = filtered["bed_lc"]
+    depts     = filtered["departments_lc"]
 
-    pts, apps, surg, room_recs, rooms, bed, depts = load_healthcare_data(EXCEL_PATH)
+    apps_raw = filtered["appointments_raw"].copy()
+    apps_raw.columns = apps_raw.columns.str.lower()
+    apps_raw["year"]  = pd.to_datetime(apps_raw.get("appointment_date"), errors="coerce").dt.year
+    apps_raw["month"] = pd.to_datetime(apps_raw.get("appointment_date"), errors="coerce").dt.month
+    valid_years = apps_raw.groupby("year")["month"].nunique()
+    valid_years = valid_years[valid_years >= 6].index.tolist()
 
-    apps["month"]      = apps["appointment_date"].dt.month
-    apps["month_name"] = apps["appointment_date"].dt.strftime("%b")
-    apps["year"]       = apps["appointment_date"].dt.year
+    if "appointment_date" in apps_f.columns:
+        apps_f = apps_f.copy()
+        apps_f["appointment_date"] = pd.to_datetime(apps_f["appointment_date"], errors="coerce")
+        apps_f["month"]      = apps_f["appointment_date"].dt.month
+        apps_f["month_name"] = apps_f["appointment_date"].dt.strftime("%b")
+        apps_f["year"]       = apps_f["appointment_date"].dt.year
 
-    monthly_counts = apps.groupby(["year","month","month_name"]).size().reset_index(name="Count").sort_values(["year","month"])
-    valid_years    = apps.groupby("year")["month"].nunique()
-    valid_years    = valid_years[valid_years >= 6].index.tolist()
-    monthly_counts = monthly_counts[monthly_counts["year"].isin(valid_years)]
+    dept_flow_f = pd.DataFrame()
+    if not room_recs.empty and not rooms.empty and not depts.empty:
+        dept_flow_f = room_recs.merge(rooms, on="room_no", how="left").merge(depts, on="dept_id", how="left")
 
-    # Use full data — no top-of-page filters
-    apps_f = apps.copy()
-    dept_flow_all = room_recs.merge(rooms, on="room_no", how="left").merge(depts, on="dept_id", how="left")
-    dept_flow_f   = dept_flow_all.copy()
+    if apps_f.empty:
+        st.warning("No appointment data matches the current global filters.")
+        return
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
-    total_patients    = pts["patient_id"].nunique()
-    total_appointments= apps_f["appointment_id"].nunique()
-    admitted_patients = pd.concat([room_recs["patient_id"], bed["patient_id"]]).dropna()
-    total_admissions  = admitted_patients.nunique()
-    cancel_count      = apps_f["appointment_status"].astype(str).str.lower().isin(["cancelled","canceled"]).sum()
-    cancel_rate       = round((cancel_count / max(total_appointments, 1)) * 100, 2)
+    # ── Cross-filter state ────────────────────────────────────────────────────
+    # Session key: "p1_cf_dept" — set by clicking the Department Demand bar chart
+    if "p1_cf_dept" not in st.session_state:
+        st.session_state["p1_cf_dept"] = None
+
+    cf_dept = st.session_state["p1_cf_dept"]
+
+    # Apply cross-filter to downstream dataframes
+    def _cf_apply_appts(df):
+        """Filter lowercased appointments by clicked dept_name."""
+        if cf_dept is None or "dept_name" not in df.columns:
+            return df
+        return df[df["dept_name"].str.lower() == cf_dept.lower()]
+
+    apps_cf   = _cf_apply_appts(apps_f)
+    bed_cf    = bed if cf_dept is None else (
+        bed[bed["dept_name"].str.lower() == cf_dept.lower()]
+        if "dept_name" in bed.columns else bed
+    )
+
+    # Show cross-filter banner
+    if cf_dept:
+        bc1, bc2 = st.columns([6, 1])
+        with bc1:
+            st.markdown(f"""<div class='cf-banner'>
+                <span style='font-size:20px;'></span>
+                <span class='cf-banner-text'>Cross-filtering by department: <b>{cf_dept}</b> — all charts updated</span>
+            </div>""", unsafe_allow_html=True)
+        with bc2:
+            if st.button("✕ Clear", key="p1_cf_clear"):
+                st.session_state["p1_cf_dept"] = None
+                st.rerun()
+
+    # ── KPIs (react to cross-filter) ─────────────────────────────────────────
+    total_patients     = pts["patient_Id"].nunique()
+    total_appointments = apps_cf["appointment_id"].nunique() if "appointment_id" in apps_cf.columns else len(apps_cf)
+    admitted_patients  = pd.concat([room_recs["patient_id"], bed_cf["patient_id"]]).dropna() \
+                         if "patient_id" in bed_cf.columns else room_recs["patient_id"].dropna()
+    total_admissions   = admitted_patients.nunique()
+    cancel_count  = apps_cf["appointment_status"].astype(str).str.lower().isin(["cancelled","canceled"]).sum()
+    cancel_rate   = round((cancel_count / max(total_appointments, 1)) * 100, 2)
 
     st.markdown(f"""
     <div style='display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-bottom:36px;'>
@@ -138,12 +180,13 @@ def run():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Patient Flow Trends ────────────────────────────────────────────────────
+    # ── Patient Flow Trends (reacts to cross-filter) ──────────────────────────
     st.markdown("<div class='section-header'>Patient Flow Trends</div>", unsafe_allow_html=True)
 
-    if "appointment_date" in apps_f.columns and "admission_date" in room_recs.columns:
-        flow_apps = apps_f.dropna(subset=["appointment_date"]).groupby(apps_f["appointment_date"].dt.to_period("M")).size().rename("Appointments")
-        flow_adm  = room_recs.dropna(subset=["admission_date"]).groupby(room_recs["admission_date"].dt.to_period("M")).size().rename("Admissions")
+    if "appointment_date" in apps_cf.columns and "admission_date" in room_recs.columns:
+        flow_apps = apps_cf.dropna(subset=["appointment_date"]).groupby(apps_cf["appointment_date"].dt.to_period("M")).size().rename("Appointments")
+        flow_adm  = bed_cf.dropna(subset=["admission_date"]).groupby(bed_cf["admission_date"].dt.to_period("M")).size().rename("Admissions") \
+                    if "admission_date" in bed_cf.columns else pd.Series(name="Admissions")
         flow_data = pd.concat([flow_apps, flow_adm], axis=1).fillna(0)
         flow_data.index = flow_data.index.to_timestamp().strftime('%b %Y')
 
@@ -158,14 +201,13 @@ def run():
             marker=dict(size=12, color=PRIMARY_BLUE, line=dict(width=3, color='white')),
             hovertemplate='<b>%{x}</b><br>Appointments: %{y:,}<extra></extra>'
         ))
-        fig_flow.add_trace(go.Scatter(
-            x=flow_data.index, y=flow_data["Admissions"], mode='lines+markers', name='Admissions',
-            line=dict(color=CORAL, width=5),
-            marker=dict(size=12, color=CORAL, line=dict(width=3, color='white')),
-            hovertemplate='<b>%{x}</b><br>Admissions: %{y:,}<extra></extra>'
-        ))
-        # Moving average REMOVED per user request
-
+        if "Admissions" in flow_data.columns:
+            fig_flow.add_trace(go.Scatter(
+                x=flow_data.index, y=flow_data["Admissions"], mode='lines+markers', name='Admissions',
+                line=dict(color=CORAL, width=5),
+                marker=dict(size=12, color=CORAL, line=dict(width=3, color='white')),
+                hovertemplate='<b>%{x}</b><br>Admissions: %{y:,}<extra></extra>'
+            ))
         fig_flow.update_xaxes(tickmode='array', tickvals=tick_vals, tickangle=-45)
         fig_flow.update_layout(
             xaxis_title="<b>Month</b>", yaxis_title="<b>Patient Count</b>",
@@ -181,13 +223,13 @@ def run():
         )
         st.plotly_chart(fig_flow, use_container_width=True, config={'displayModeBar': True})
 
-    # ── Appointment Outcomes ──────────────────────────────────────────────────
+    # ── Appointment Outcomes (reacts to cross-filter) ─────────────────────────
     st.markdown("<div class='section-header'>Appointment Outcomes</div>", unsafe_allow_html=True)
 
     oc1, oc2 = st.columns([3, 2], gap="large")
     with oc1:
-        if "appointment_status" in apps_f.columns:
-            status_counts = apps_f["appointment_status"].value_counts().reset_index()
+        if "appointment_status" in apps_cf.columns:
+            status_counts = apps_cf["appointment_status"].value_counts().reset_index()
             status_counts.columns = ["Status", "Count"]
             colors = [PRIMARY_BLUE, SUCCESS_GREEN, WARNING_AMBER, '#94A3B8']
             fig_pie = go.Figure(data=[go.Pie(
@@ -212,10 +254,10 @@ def run():
     with oc2:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:18px;font-weight:800;color:{text_color};margin-bottom:14px;'>Status Breakdown</div>", unsafe_allow_html=True)
-        if "appointment_status" in apps_f.columns:
-            sc = apps_f["appointment_status"].value_counts()
+        if "appointment_status" in apps_cf.columns:
+            sc = apps_cf["appointment_status"].value_counts()
             for s, c in sc.items():
-                pct = round(c / len(apps_f) * 100, 1)
+                pct = round(c / max(len(apps_cf), 1) * 100, 1)
                 st.markdown(f"""<div style='display:flex;justify-content:space-between;
                     padding:12px 18px;border-radius:10px;margin:6px 0;
                     background:{card_bg};border:1px solid {bdr};'>
@@ -223,32 +265,53 @@ def run():
                     <span style='font-weight:800;color:{PRIMARY_BLUE};font-size:16px;'>{c:,} ({pct}%)</span>
                 </div>""", unsafe_allow_html=True)
 
-    # ── Department Demand ─────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # DEPARTMENT DEMAND — CROSS-FILTER TRIGGER CHART
+    # Clicking a bar sets p1_cf_dept and reruns the page
+    # ══════════════════════════════════════════════════════════════════════════
     st.markdown("<div class='section-header'>Department Demand</div>", unsafe_allow_html=True)
+    st.caption("Click any bar to cross-filter all charts on this page by that department.")
 
-    dept_chart = dept_flow_f.groupby("dept_name").size().reset_index(name="Admissions").sort_values("Admissions", ascending=True)
+    dept_chart = dept_flow_f.groupby("dept_name").size().reset_index(name="Admissions").sort_values("Admissions", ascending=True) \
+                 if not dept_flow_f.empty else pd.DataFrame(columns=["dept_name","Admissions"])
 
     dc1, dc2 = st.columns([3, 1], gap="large")
     with dc1:
-        fig_dept = go.Figure(go.Bar(
-            x=dept_chart["Admissions"], y=dept_chart["dept_name"], orientation="h",
-            marker=dict(
-                color=dept_chart["Admissions"],
-                colorscale=[[0, SECONDARY_BLUE], [1, PRIMARY_BLUE]],
-                cornerradius=8,
-                line=dict(color='white', width=1)
-            ),
-            hovertemplate='<b>%{y}</b><br>Admissions: %{x:,}<extra></extra>'
-        ))
-        fig_dept.update_layout(
-            height=500, showlegend=False,
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            xaxis_title="<b>Number of Admissions</b>", yaxis_title="",
-            xaxis=dict(showgrid=True, gridcolor=GRID_COLOR, tickfont=TICK_FONT, title_font=TITLE_FONT),
-            yaxis=dict(showgrid=False, tickfont=TICK_FONT),
-            margin=dict(t=20, b=60, l=30, r=30)
-        )
-        st.plotly_chart(fig_dept, use_container_width=True, config={'displayModeBar': False})
+        if not dept_chart.empty:
+            # Highlight selected bar
+            bar_colors = []
+            for d in dept_chart["dept_name"]:
+                if cf_dept and d.lower() == cf_dept.lower():
+                    bar_colors.append(CORAL)
+                else:
+                    bar_colors.append(PRIMARY_BLUE)
+
+            fig_dept = go.Figure(go.Bar(
+                x=dept_chart["Admissions"], y=dept_chart["dept_name"], orientation="h",
+                marker=dict(color=bar_colors, cornerradius=8, line=dict(color='white', width=1)),
+                hovertemplate='<b>%{y}</b><br>Admissions: %{x:,}<br><i>Click to cross-filter</i><extra></extra>'
+            ))
+            fig_dept.update_layout(
+                height=500, showlegend=False,
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                xaxis_title="<b>Number of Admissions</b>", yaxis_title="",
+                xaxis=dict(showgrid=True, gridcolor=GRID_COLOR, tickfont=TICK_FONT, title_font=TITLE_FONT),
+                yaxis=dict(showgrid=False, tickfont=TICK_FONT),
+                margin=dict(t=20, b=60, l=30, r=30)
+            )
+
+            # ── Cross-filter event capture ─────────────────────────────────
+            event = st.plotly_chart(
+                fig_dept, use_container_width=True,
+                config={'displayModeBar': False},
+                on_select="rerun",
+                key="p1_dept_chart"
+            )
+            if event and event.selection and event.selection.points:
+                clicked = event.selection.points[0].get("y") or event.selection.points[0].get("label")
+                if clicked and clicked != st.session_state.get("p1_cf_dept"):
+                    st.session_state["p1_cf_dept"] = clicked
+                    st.rerun()
 
     with dc2:
         st.markdown("<br><br>", unsafe_allow_html=True)
@@ -269,40 +332,41 @@ def run():
                 <div class='insight-text'>Average admissions per department: <b>{avg_ad:.0f}</b>.</div>
             </div>""", unsafe_allow_html=True)
 
-    # ── Peak Appointment Months ───────────────────────────────────────────────
+    # ── Peak Appointment Months (reacts to cross-filter) ──────────────────────
     st.markdown("<div class='section-header'>Peak Appointment Months</div>", unsafe_allow_html=True)
 
-    mc_f = apps_f.groupby(["year","month","month_name"]).size().reset_index(name="Count").sort_values(["year","month"])
-    mc_f = mc_f[mc_f["year"].isin(valid_years)]
+    mc_f = apps_cf.groupby(["year","month","month_name"]).size().reset_index(name="Count").sort_values(["year","month"]) \
+           if "year" in apps_cf.columns else pd.DataFrame()
+    if not mc_f.empty:
+        mc_f = mc_f[mc_f["year"].isin(valid_years)]
 
-    fig_months = go.Figure()
-    for year in sorted(mc_f["year"].unique()):
-        yd = mc_f[mc_f["year"] == year].copy()
-        yd["month_name"] = pd.Categorical(yd["month_name"], categories=MONTH_ORDER, ordered=True)
-        yd = yd.sort_values("month_name")
-        fig_months.add_trace(go.Bar(
-            name=str(year), x=yd["month_name"], y=yd["Count"],
-            marker=dict(color=YEAR_COLORS.get(year, "#95A5A6"), opacity=0.88,
-                        cornerradius=6, line=dict(color='white', width=1)),
-            hovertemplate=f"<b>{year}</b><br>%{{x}}: %{{y:,}}<extra></extra>"
-        ))
-    fig_months.update_layout(
-        barmode="group",
-        xaxis_title="<b>Month</b>", yaxis_title="<b>Appointments</b>",
-        xaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT),
-        yaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT, showgrid=True, gridcolor=GRID_COLOR),
-        height=450, margin=dict(l=20, r=20, t=30, b=50),
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-        legend=dict(font=dict(size=14, family="Arial Black", color=text_color),
-                    bgcolor='rgba(0,0,0,0)')
-    )
-    st.plotly_chart(fig_months, use_container_width=True, config={'displayModeBar': True})
+        fig_months = go.Figure()
+        for year in sorted(mc_f["year"].unique()):
+            yd = mc_f[mc_f["year"] == year].copy()
+            yd["month_name"] = pd.Categorical(yd["month_name"], categories=MONTH_ORDER, ordered=True)
+            yd = yd.sort_values("month_name")
+            fig_months.add_trace(go.Bar(
+                name=str(year), x=yd["month_name"], y=yd["Count"],
+                marker=dict(color=YEAR_COLORS.get(year, "#95A5A6"), opacity=0.88,
+                            cornerradius=6, line=dict(color='white', width=1)),
+                hovertemplate=f"<b>{year}</b><br>%{{x}}: %{{y:,}}<extra></extra>"
+            ))
+        fig_months.update_layout(
+            barmode="group",
+            xaxis_title="<b>Month</b>", yaxis_title="<b>Appointments</b>",
+            xaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT),
+            yaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT, showgrid=True, gridcolor=GRID_COLOR),
+            height=450, margin=dict(l=20, r=20, t=30, b=50),
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            legend=dict(font=dict(size=14, family="Arial Black", color=text_color), bgcolor='rgba(0,0,0,0)')
+        )
+        st.plotly_chart(fig_months, use_container_width=True, config={'displayModeBar': True})
 
-    # ── Appointment Completion Rate ───────────────────────────────────────────
+    # ── Appointment Completion Rate (reacts to cross-filter) ──────────────────
     st.markdown("<div class='section-header'>Appointment Completion Rate</div>", unsafe_allow_html=True)
 
-    if "appointment_date" in apps_f.columns and "appointment_status" in apps_f.columns:
-        apps_f2 = apps_f.copy()
+    if "appointment_date" in apps_cf.columns and "appointment_status" in apps_cf.columns:
+        apps_f2 = apps_cf.copy()
         apps_f2["month_period"] = apps_f2["appointment_date"].dt.to_period("M")
         monthly_total     = apps_f2.groupby("month_period").size()
         monthly_completed = apps_f2[apps_f2["appointment_status"].astype(str).str.lower()=="completed"].groupby("month_period").size()
@@ -313,15 +377,12 @@ def run():
         x_vals     = cr_data["Month"].tolist()
         show_every = max(1, len(x_vals) // 6)
         tick_vals  = x_vals[::show_every]
-
-        # Fixed y-axis from 40 to ~85 so variation is clearly visible
-        data_max = cr_data["Completion Rate (%)"].max()
+        data_max   = cr_data["Completion Rate (%)"].max()
         y_min = 40
         y_max = max(85, data_max + 3)
 
         fig_cr = go.Figure()
-        fig_cr.add_hrect(y0=80, y1=y_max,
-                         fillcolor=SUCCESS_GREEN, opacity=0.05, line_width=0)
+        fig_cr.add_hrect(y0=80, y1=y_max, fillcolor=SUCCESS_GREEN, opacity=0.05, line_width=0)
         fig_cr.add_hline(y=80, line_width=2, line_dash="dash", line_color=SUCCESS_GREEN,
                          annotation_text="80% Target", annotation_position="top right",
                          annotation_font=dict(size=12, color=SUCCESS_GREEN, family="Arial Black"))
@@ -344,8 +405,7 @@ def run():
             margin=dict(t=40, b=80, l=60, r=40),
             xaxis=dict(showgrid=True, gridcolor=GRID_COLOR, tickfont=TICK_FONT, title_font=TITLE_FONT),
             yaxis=dict(showgrid=True, gridcolor=GRID_COLOR, tickfont=TICK_FONT, title_font=TITLE_FONT,
-                       range=[y_min, y_max],
-                       dtick=10)
+                       range=[y_min, y_max], dtick=10)
         )
         st.plotly_chart(fig_cr, use_container_width=True, config={'displayModeBar': True})
 

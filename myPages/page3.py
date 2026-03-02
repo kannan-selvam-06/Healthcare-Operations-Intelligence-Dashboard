@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-def run():
+def run(filtered: dict):
     dark_mode = st.session_state.get('dark_mode', False)
 
     if dark_mode:
@@ -85,18 +85,12 @@ def run():
     st.markdown("<div class='page-title'>Clinical & Disease Intelligence</div>", unsafe_allow_html=True)
     st.markdown("<div class='page-subtitle'>Comprehensive medical patterns and surgical analytics for strategic clinical insights</div>", unsafe_allow_html=True)
 
-    @st.cache_data
-    def load_data():
-        file_path   = "data/dataFinal.xlsx"
-        patients    = pd.read_excel(file_path, sheet_name="Patients")
-        doctors     = pd.read_excel(file_path, sheet_name="Doctor")
-        departments = pd.read_excel(file_path, sheet_name="Department")
-        surgeries   = pd.read_excel(file_path, sheet_name="SurgeryRecord")
-        return patients, doctors, departments, surgeries
-
-    patients, doctors, departments, surgeries = load_data()
-
-    surgeries["surgery_Date"] = pd.to_datetime(surgeries["surgery_Date"], errors="coerce")
+    # ── Unpack pre-filtered data ─────────────────────────────────────────────
+    patients    = filtered["patients"]
+    doctors     = filtered["doctors"]
+    departments = filtered["departments"]
+    # Use raw surgeries for the unfiltered top-10 chart, filtered for drill-down
+    surgeries   = filtered["surgeries"]   # date-filtered by global filter
 
     # ── Interactive Filters ────────────────────────────────────────────────────
     st.markdown("<div class='filter-bar'>", unsafe_allow_html=True)
@@ -112,8 +106,11 @@ def run():
         sel_yrs     = st.multiselect("Year", yr_opts, default=yr_opts, key="p3_yr")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    df = pd.merge(patients, surgeries, on='patient_Id', how='left')
-    df = pd.merge(df, doctors[['doct_Id','dept_Id']], left_on='surgeon_Id', right_on='doct_Id', how='left').drop(columns=['doct_Id'])
+    # Drop dept_Name/dept_Id already added by load_all to avoid _x/_y suffix conflicts
+    surgeries_clean = surgeries.drop(
+        columns=[c for c in ["dept_Name", "dept_Id"] if c in surgeries.columns], errors="ignore")
+    df = pd.merge(patients, surgeries_clean, on='patient_Id', how='left')
+    df = pd.merge(df, doctors[['doct_Id','dept_Id']], left_on='surgeon_Id', right_on='doct_Id', how='left').drop(columns=['doct_Id'], errors='ignore')
     df = pd.merge(df, departments, on='dept_Id', how='left')
 
     current = df.copy()
@@ -121,6 +118,31 @@ def run():
     if sel_stype: current = current[current['surgery_Type'].isin(sel_stype)]
     if sel_yrs:
         current = current[current['surgery_Date'].dt.year.isin(sel_yrs)]
+
+    # ── Cross-filter state ────────────────────────────────────────────────────
+    # Trigger: Surgery Distribution by Department bar → filters Dept-wise Type, Trend, Heatmap
+    if "p3_cf_dept" not in st.session_state:
+        st.session_state["p3_cf_dept"] = None
+    cf_dept = st.session_state["p3_cf_dept"]
+
+    def _cf(df):
+        if cf_dept is None or 'dept_Name' not in df.columns:
+            return df
+        return df[df['dept_Name'] == cf_dept]
+
+    cf_current = _cf(current)
+
+    if cf_dept:
+        bc1, bc2 = st.columns([6, 1])
+        with bc1:
+            st.markdown(f"""<div class='filter-bar' style='border-left:4px solid #F97316;margin-bottom:12px;'>
+                 <b style='font-size:14px;'>Cross-filtering by department: {cf_dept}</b>
+                — Surgery Type, Trend and Heatmap charts updated
+            </div>""", unsafe_allow_html=True)
+        with bc2:
+            if st.button("✕ Clear", key="p3_cf_clear"):
+                st.session_state["p3_cf_dept"] = None
+                st.rerun()
 
     # ── KPIs — 3 cards (Total Patients removed) ──────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -185,29 +207,28 @@ def run():
             <div class='insight-text'>{total_surgs:,} combined cases across top 10 procedures.</div>
         </div>""", unsafe_allow_html=True)
 
-    # ── Chart 2: Surgery Distribution by Department ───────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # CHART 2: Surgery Distribution by Department — CROSS-FILTER TRIGGER
+    # ══════════════════════════════════════════════════════════════════════════
     st.markdown("<div class='section-header'>Surgery Distribution by Department</div>", unsafe_allow_html=True)
+    st.caption("Click any bar to cross-filter Surgery Type, Trend and Heatmap charts by that department.")
 
     dept_counts = current['dept_Name'].value_counts().reset_index()
     dept_counts.columns = ['dept_Name','Surgeries']
     dept_counts = dept_counts.sort_values('Surgeries', ascending=True)
+
+    bar_colors_dept = [CORAL if (cf_dept and d == cf_dept) else PRIMARY_BLUE for d in dept_counts['dept_Name']]
 
     fig4 = go.Figure(go.Bar(
         x=dept_counts['Surgeries'],
         y=dept_counts['dept_Name'],
         orientation='h',
         marker=dict(
-            color=dept_counts['Surgeries'],
-            colorscale=[[0, SECONDARY_BLUE],[0.5, PRIMARY_BLUE],[1, PURPLE]],
-            showscale=True,
-            colorbar=dict(
-                title=dict(text="<b>Surgeries</b>", font=dict(size=13, family="Arial Black", color=text_color)),
-                tickfont=dict(size=12, family="Arial Black", color=text_color),
-                thickness=15, len=0.7
-            ),
+            color=bar_colors_dept,
+            showscale=False,
             line=dict(color='white', width=1.5), cornerradius=6
         ),
-        hovertemplate='<b>%{y}</b><br>Surgeries: %{x:,}<extra></extra>'
+        hovertemplate='<b>%{y}</b><br>Surgeries: %{x:,}<br><i>Click to cross-filter</i><extra></extra>'
     ))
     fig4.update_layout(
         xaxis_title="<b>Number of Surgeries</b>", yaxis_title="",
@@ -216,14 +237,24 @@ def run():
         height=500, margin=dict(l=20, r=80, t=20, b=50),
         plot_bgcolor=plot_bg, paper_bgcolor=paper_bg, showlegend=False
     )
-    st.plotly_chart(fig4, use_container_width=True, config={'displayModeBar': False})
+    event4 = st.plotly_chart(
+        fig4, use_container_width=True,
+        config={'displayModeBar': False},
+        on_select="rerun",
+        key="p3_dept_chart"
+    )
+    if event4 and event4.selection and event4.selection.points:
+        clicked = event4.selection.points[0].get("y")
+        if clicked and clicked != st.session_state.get("p3_cf_dept"):
+            st.session_state["p3_cf_dept"] = clicked
+            st.rerun()
 
-    # ── Chart 3: Department-wise Surgery Type Distribution ────────────────────
+    # ── Chart 3: Department-wise Surgery Type Distribution (reacts to cf) ───────
     st.markdown("<div class='section-header'>Department-wise Surgery Type Distribution</div>", unsafe_allow_html=True)
 
-    top_depts  = current['dept_Name'].value_counts().head(5).index
-    top_stypes = current['surgery_Type'].value_counts().head(5).index
-    dm = current[current['dept_Name'].isin(top_depts) & current['surgery_Type'].isin(top_stypes)]
+    top_depts  = cf_current['dept_Name'].value_counts().head(5).index
+    top_stypes = cf_current['surgery_Type'].value_counts().head(5).index
+    dm = cf_current[cf_current['dept_Name'].isin(top_depts) & cf_current['surgery_Type'].isin(top_stypes)]
     dm = dm.groupby(['dept_Name','surgery_Type']).size().reset_index(name='Count')
 
     GROUP_COLORS = [PRIMARY_BLUE,'#0891b2', SUCCESS_GREEN, CORAL, PURPLE]
@@ -252,10 +283,11 @@ def run():
     )
     st.plotly_chart(fig5, use_container_width=True, config={'displayModeBar': False})
 
-    # ── Chart 4: Surgery Trend Over Time ─────────────────────────────────────
+    # ── Chart 4: Surgery Trend Over Time (reacts to cf) ───────────────────────
     st.markdown("<div class='section-header'>Surgery Trend Over Time</div>", unsafe_allow_html=True)
 
-    surgery_trend_df = surgeries.copy()
+    surg_for_trend = _cf(surgeries)   # filter raw surgeries by clicked dept
+    surgery_trend_df = surg_for_trend.copy()
     surgery_trend_df['Month_Year'] = surgery_trend_df['surgery_Date'].dt.strftime('%b %Y')
     surgery_trend_df['Sort_Date']  = surgery_trend_df['surgery_Date'].dt.to_period('M')
     surgery_trend = surgery_trend_df.groupby(['Month_Year','Sort_Date']).size().reset_index(name="Count").sort_values('Sort_Date')
@@ -280,11 +312,13 @@ def run():
     )
     st.plotly_chart(fig6, use_container_width=True, config={'displayModeBar': False})
 
-    # ── Chart 5: Doctor-Department Surgery Heatmap ───────────────────────────
+    # ── Chart 5: Doctor-Department Surgery Heatmap (reacts to cf) ────────────
     st.markdown("<div class='section-header'>Doctor–Department Surgery Heatmap</div>", unsafe_allow_html=True)
 
-    surg_heat  = surgeries.copy()
+    surg_heat  = surg_for_trend.copy()
     doc_dept   = doctors.merge(departments, on='dept_Id', how='left')[['doct_Id','FName','dept_Name']]
+    # Drop pre-existing dept_Name from surg_heat before merging doc_dept
+    surg_heat  = surg_heat.drop(columns=[c for c in ['dept_Name','dept_Id'] if c in surg_heat.columns], errors='ignore')
     surg_heat  = surg_heat.merge(doc_dept, left_on='surgeon_Id', right_on='doct_Id', how='inner')
     surg_heat  = surg_heat.dropna(subset=['FName','dept_Name'])
     heat_counts= surg_heat.groupby(['FName','dept_Name']).size().reset_index(name='Count')

@@ -10,32 +10,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 from datetime import datetime
 
-# ── Data loader ────────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner="Loading data...")
-def _load_p6():
-    xls     = pd.ExcelFile("data/dataFinal.xlsx")
-    patients= pd.read_excel(xls, "Patients")
-    appts   = pd.read_excel(xls, "Appointment")
-    bed_rec = pd.read_excel(xls, "BedRecords")
-    bed_df  = pd.read_excel(xls, "Bed")
-    ward_df = pd.read_excel(xls, "Ward")
-    surg    = pd.read_excel(xls, "SurgeryRecord")
-    doctors = pd.read_excel(xls, "Doctor")
-    depts   = pd.read_excel(xls, "Department")
-    nurses  = pd.read_excel(xls, "Nurse")
-
-    appts["appointment_Date"] = pd.to_datetime(appts["appointment_Date"],  errors="coerce")
-    bed_rec["admission_Date"] = pd.to_datetime(bed_rec["admission_Date"],  errors="coerce")
-    bed_rec["discharge_Date"] = pd.to_datetime(bed_rec["discharge_Date"],  errors="coerce")
-    surg["surgery_Date"]      = pd.to_datetime(surg["surgery_Date"],       errors="coerce")
-    bed_rec["LOS"]            = (bed_rec["discharge_Date"] - bed_rec["admission_Date"]).dt.days
-
-    bed_full = (bed_rec
-        .merge(bed_df,  on="bed_No",  how="left")
-        .merge(ward_df, on="ward_No", how="left")
-        .merge(depts,   on="dept_Id", how="left"))
-
-    return patients, appts, bed_rec, bed_full, surg, doctors, depts, nurses
+# Data loading handled centrally in app.py
 
 
 # ── Matplotlib chart helpers ───────────────────────────────────────────────────
@@ -560,7 +535,7 @@ def build_pdf(selected_chart_ids, r_title, r_author, r_dept, r_notes,
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN PAGE
 # ══════════════════════════════════════════════════════════════════════════════
-def run():
+def run(filtered: dict):
     dm = st.session_state.get("dark_mode", False)
 
     PB  = "#60A5FA" if dm else "#1E40AF"
@@ -670,7 +645,19 @@ def run():
     st.markdown("<div class='pg-title'>Intelligence & Capacity Planning</div>", unsafe_allow_html=True)
     st.markdown("<div class='pg-sub'>Capacity Planning Simulator  |  PDF Report Builder  |  Strategic Resource Forecasting</div>", unsafe_allow_html=True)
 
-    patients, appts, bed_rec, bed_full, surg, doctors, depts, nurses = _load_p6()
+    # ── Unpack pre-filtered data ─────────────────────────────────────────────
+    patients = filtered["patients"]
+    appts    = filtered["appointments"]
+    bed_rec  = filtered["bed_records"]
+    bed_full = filtered["bed_full"]
+    surg     = filtered["surgeries"]
+    doctors  = filtered["doctors"]
+    depts    = filtered["departments"]
+    nurses   = filtered["nurses"]
+
+    if appts.empty and bed_rec.empty:
+        st.warning("No data matches the current global filters.")
+        return
 
     # Shared metrics
     n_months    = max(bed_rec["admission_Date"].dt.to_period("M").nunique(), 1)
@@ -908,7 +895,7 @@ def run():
 
         fname = f"Hospital_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
         st.download_button(
-            label="⬇️ Download PDF Report",
+            label="Download PDF Report",
             data=pdf_bytes, file_name=fname, mime="application/pdf",
             use_container_width=True,
         )

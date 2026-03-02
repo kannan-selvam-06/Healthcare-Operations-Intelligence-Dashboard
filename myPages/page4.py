@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
-def run():
+def run(filtered: dict):
     dark_mode = st.session_state.get('dark_mode', False)
 
     if dark_mode:
@@ -81,30 +81,17 @@ def run():
     st.markdown("<div class='page-subtitle'>Comprehensive analysis of bed utilization, patient flow, and operational performance metrics</div>", unsafe_allow_html=True)
 
     # ── Load Data ──────────────────────────────────────────────────────────────
-    @st.cache_data
-    def load_data():
-        file_path   = "data/dataFinal.xlsx"
-        xls         = pd.ExcelFile(file_path)
-        bed_records = xls.parse("BedRecords")
-        bed         = xls.parse("Bed")
-        ward        = xls.parse("Ward")
-        department  = xls.parse("Department")
-        appointments= xls.parse("Appointment")
-        nurses      = xls.parse("Nurse")
-
-        df = bed_records.merge(bed, on="bed_No", how="left")
-        df = df.merge(ward, on="ward_No", how="left")
-        df = df.merge(department, on="dept_Id", how="left")
-
-        df['admission_Date']  = pd.to_datetime(df['admission_Date'])
-        df['discharge_Date']  = pd.to_datetime(df['discharge_Date'])
-        df['Length_of_Stay']  = (df['discharge_Date'] - df['admission_Date']).dt.days
-        appointments["appointment_Date"] = pd.to_datetime(appointments["appointment_Date"], errors="coerce")
-        return df[df['Length_of_Stay'].isna() | (df['Length_of_Stay'] >= 0)], appointments, nurses
-
-    df, appointments, nurses = load_data()
+    # ── Unpack pre-filtered data ─────────────────────────────────────────────
+    df           = filtered["bed_full"].copy()
+    df           = df[df['Length_of_Stay'].isna() | (df['Length_of_Stay'] >= 0)]
+    appointments = filtered["appointments"]
+    nurses       = filtered["nurses"]
     df_completed = df.dropna(subset=["discharge_Date"]).copy()
     cutoff_date  = pd.Timestamp("2025-12-01")
+
+    if df.empty:
+        st.warning("No bed record data matches the current global filters.")
+        return
 
     # ── Compute alert metrics ──────────────────────────────────────────────────
     n_months   = max(df["admission_Date"].dt.to_period("M").nunique(), 1)
@@ -189,26 +176,9 @@ def run():
         return vals, vals
 
     # ── LOS Analysis ──────────────────────────────────────────────────────────
-    st.markdown("<div class='section-header'>Length of Stay Analysis</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>Length of Stay Analysis - Category Breakdown</div>", unsafe_allow_html=True)
 
     los_df = df[df['discharge_Date'] < cutoff_date].copy()
-
-    fig1 = go.Figure()
-    fig1.add_trace(go.Histogram(
-        x=los_df['Length_of_Stay'], nbinsx=20,
-        marker=dict(color=SECONDARY_BLUE, line=dict(color='white', width=1)),
-        hovertemplate='LOS: %{x} days<br>Patients: %{y}<extra></extra>'
-    ))
-    fig1.update_layout(
-        title=dict(text="<b>Length of Stay Distribution</b>",
-                   font=dict(size=20, color=text_color, family="Arial Black"), x=0.5, xanchor='center'),
-        xaxis_title="<b>Days</b>", yaxis_title="<b>Number of Patients</b>",
-        xaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT, showgrid=True, gridcolor=GRID_COLOR),
-        yaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT, showgrid=True, gridcolor=GRID_COLOR),
-        height=430, margin=dict(l=60, r=40, t=70, b=60),
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-    )
-    st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
 
     # LOS Donut
     bins       = [0, 3, 7, 14, 30, float('inf')]
@@ -225,7 +195,7 @@ def run():
         direction='clockwise', sort=False
     ))
     fig2.update_layout(
-        title=dict(text="<b>LOS Category Breakdown</b>",
+        title=dict(text="<b></b>",
                    font=dict(size=20, color=text_color, family="Arial Black"), x=0.5, xanchor='center'),
         legend=dict(font=dict(size=13, family="Arial Black", color=text_color),
                     orientation='v', x=1.05, y=0.5, xanchor='left', bgcolor='rgba(0,0,0,0)'),
@@ -237,13 +207,44 @@ def run():
     # ── Ward & Department Insights ─────────────────────────────────────────────
     st.markdown("<div class='section-header'>Ward & Department Insights</div>", unsafe_allow_html=True)
 
-    # Ward admissions
+    # ── Cross-filter state ────────────────────────────────────────────────────
+    # Trigger: Ward Utilization bar → filters LOS Deviation, Flow Trends, Bed Turnover
+    if "p4_cf_ward" not in st.session_state:
+        st.session_state["p4_cf_ward"] = None
+    cf_ward = st.session_state["p4_cf_ward"]
+
+    def _cf_ward(df_in):
+        if cf_ward is None or 'ward_Name' not in df_in.columns:
+            return df_in
+        return df_in[df_in['ward_Name'] == cf_ward]
+
+    df_cf          = _cf_ward(df)
+    df_completed_cf= _cf_ward(df_completed)
+
+    if cf_ward:
+        bc1, bc2 = st.columns([6, 1])
+        with bc1:
+            st.markdown(f"""<div class='ac-amber'>
+                 <b>Cross-filtering by ward: {cf_ward}</b>
+                — LOS Deviation, Flow Trends and Bed Turnover updated
+            </div>""", unsafe_allow_html=True)
+        with bc2:
+            if st.button("✕ Clear", key="p4_cf_clear"):
+                st.session_state["p4_cf_ward"] = None
+                st.rerun()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Ward admissions — CROSS-FILTER TRIGGER
+    # ══════════════════════════════════════════════════════════════════════════
+    st.caption("Click any ward bar to cross-filter LOS, Flow Trends and Bed Turnover charts.")
     ward_adm = df.groupby('ward_Name')['admission_Id'].count().sort_values()
+    bar_colors_ward = [CORAL if (cf_ward and w == cf_ward) else ORANGE for w in ward_adm.index]
+
     fig3 = go.Figure()
     fig3.add_trace(go.Bar(
         x=ward_adm.values, y=ward_adm.index, orientation='h',
-        marker=dict(color=ORANGE, line=dict(color='white', width=1.5), cornerradius=6),
-        hovertemplate='<b>%{y}</b><br>Admissions: %{x:,}<extra></extra>'
+        marker=dict(color=bar_colors_ward, line=dict(color='white', width=1.5), cornerradius=6),
+        hovertemplate='<b>%{y}</b><br>Admissions: %{x:,}<br><i>Click to cross-filter</i><extra></extra>'
     ))
     fig3.update_layout(
         title=dict(text="<b>Ward Utilization Overview</b>",
@@ -254,11 +255,21 @@ def run():
         height=430, margin=dict(l=20, r=20, t=70, b=60),
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
     )
-    st.plotly_chart(fig3, use_container_width=True, config={'displayModeBar': False})
+    event3 = st.plotly_chart(
+        fig3, use_container_width=True,
+        config={'displayModeBar': False},
+        on_select="rerun",
+        key="p4_ward_chart"
+    )
+    if event3 and event3.selection and event3.selection.points:
+        clicked_ward = event3.selection.points[0].get("y")
+        if clicked_ward and clicked_ward != st.session_state.get("p4_cf_ward"):
+            st.session_state["p4_cf_ward"] = clicked_ward
+            st.rerun()
 
-    # Dept LOS deviation
-    overall_avg = df["Length_of_Stay"].mean()
-    dept_los    = df.groupby('dept_Name')['Length_of_Stay'].mean()
+    # Dept LOS deviation (reacts to cross-filter via df_cf)
+    overall_avg = df_cf["Length_of_Stay"].mean() if not df_cf.empty else df["Length_of_Stay"].mean()
+    dept_los    = df_cf.groupby('dept_Name')['Length_of_Stay'].mean() if not df_cf.empty else df.groupby('dept_Name')['Length_of_Stay'].mean()
     dept_diff   = (dept_los - overall_avg).sort_values()
     bar_colors  = [CORAL if x > 0 else PRIMARY_BLUE for x in dept_diff.values]
 
@@ -280,20 +291,18 @@ def run():
     )
     st.plotly_chart(fig4, use_container_width=True, config={'displayModeBar': False})
 
-    # Department Workload Sunburst — REMOVED per user request
-
-    # ── Patient Flow Trends ────────────────────────────────────────────────────
+    # ── Patient Flow Trends (reacts to cross-filter) ───────────────────────────
     st.markdown("<div class='section-header'>Patient Flow Trends</div>", unsafe_allow_html=True)
 
-    adm_trend = (df[df['admission_Date'] < cutoff_date]
-                 .groupby(df['admission_Date'].dt.to_period('M'))['patient_Id']
-                 .count().reset_index())
+    adm_trend = (df_cf[df_cf['admission_Date'] < cutoff_date]
+                 .groupby(df_cf['admission_Date'].dt.to_period('M'))['patient_Id']
+                 .count().reset_index()) if not df_cf.empty else pd.DataFrame(columns=['Month','patient_Id'])
     adm_trend.columns = ['Month','Admissions']
     adm_trend['Month_Display'] = adm_trend['Month'].dt.to_timestamp().dt.strftime('%b %Y')
 
-    dis_trend = (df_completed[df_completed['discharge_Date'] < cutoff_date]
-                 .groupby(df_completed['discharge_Date'].dt.to_period('M'))['patient_Id']
-                 .count().reset_index())
+    dis_trend = (df_completed_cf[df_completed_cf['discharge_Date'] < cutoff_date]
+                 .groupby(df_completed_cf['discharge_Date'].dt.to_period('M'))['patient_Id']
+                 .count().reset_index()) if not df_completed_cf.empty else pd.DataFrame(columns=['Month','patient_Id'])
     dis_trend.columns = ['Month','Discharges']
     dis_trend['Month_Display'] = dis_trend['Month'].dt.to_timestamp().dt.strftime('%b %Y')
 
@@ -328,38 +337,28 @@ def run():
     )
     st.plotly_chart(fig5, use_container_width=True, config={'displayModeBar': False})
 
-    # ── Monthly Admission Trend ────────────────────────────────────────────────
-    tv6, tt6 = spaced_ticks(monthly_summary['Month_Display'].tolist(), step=4)
-    fig6 = go.Figure()
-    fig6.add_trace(go.Scatter(
-        x=monthly_summary['Month_Display'], y=monthly_summary['admission_Id_Admissions'],
-        mode='lines+markers', line=dict(color=SUCCESS_GREEN, width=5),
-        marker=dict(size=8, color=SUCCESS_GREEN, line=dict(color='white', width=3)),
-        hovertemplate='<b>%{x}</b><br>Admissions: %{y:,}<extra></extra>'
-    ))
-    fig6.update_layout(
-        title=dict(text="<b>Monthly Admission Trend</b>",
-                   font=dict(size=22, color=text_color, family="Arial Black"), x=0.5, xanchor='center'),
-        xaxis_title="<b>Month</b>", yaxis_title="<b>Admissions</b>",
-        xaxis=dict(tickmode='array', tickvals=tv6, ticktext=tt6,
-                   tickfont=TICK_FONT, title_font=TITLE_FONT, tickangle=-45,
-                   showgrid=True, gridcolor=GRID_COLOR),
-        yaxis=dict(tickfont=TICK_FONT, title_font=TITLE_FONT, showgrid=True, gridcolor=GRID_COLOR),
-        height=450, margin=dict(l=40, r=40, t=70, b=110),
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-    )
-    st.plotly_chart(fig6, use_container_width=True, config={'displayModeBar': False})
-
-    # ── Bed Turnover Rate ──────────────────────────────────────────────────────
+    # ── Bed Turnover Rate (reacts to cross-filter) ─────────────────────────────
     st.markdown("<div class='section-header'>Bed Turnover Rate</div>", unsafe_allow_html=True)
 
-    total_beds = df["bed_No"].nunique()
-    monthly_summary["Monthly_BTR"] = monthly_summary["admission_Id_Discharges"] / total_beds
-    tv8, tt8 = spaced_ticks(monthly_summary['Month_Display'].tolist(), step=4)
+    total_beds = df_cf["bed_No"].nunique() if not df_cf.empty else df["bed_No"].nunique()
+
+    # Rebuild monthly_summary from cf data
+    df_cf_copy = df_cf.copy()
+    df_cf_copy["Month"] = df_cf_copy["admission_Date"].dt.to_period("M").astype(str)
+    df_completed_cf_copy = df_completed_cf.copy()
+    df_completed_cf_copy["Month"] = df_completed_cf_copy["discharge_Date"].dt.to_period("M").astype(str)
+    mo_adm_cf = df_cf_copy.groupby("Month")["admission_Id"].count().reset_index()
+    mo_dis_cf = df_completed_cf_copy.groupby("Month")["admission_Id"].count().reset_index()
+    ms_cf = pd.merge(mo_adm_cf, mo_dis_cf, on="Month", how="outer",
+                     suffixes=("_Admissions","_Discharges")).fillna(0).sort_values("Month")
+    ms_cf['Month_Display'] = pd.to_datetime(ms_cf['Month']).dt.strftime('%b %Y')
+    ms_cf["Monthly_BTR"] = ms_cf["admission_Id_Discharges"] / max(total_beds, 1)
+
+    tv8, tt8 = spaced_ticks(ms_cf['Month_Display'].tolist(), step=4)
 
     fig8 = go.Figure()
     fig8.add_trace(go.Bar(
-        x=monthly_summary['Month_Display'], y=monthly_summary['Monthly_BTR'],
+        x=ms_cf['Month_Display'], y=ms_cf['Monthly_BTR'],
         marker=dict(color=PURPLE, line=dict(color='white', width=2), cornerradius=8),
         hovertemplate='<b>%{x}</b><br>Bed Turnover Rate: %{y:.2f}<extra></extra>'
     ))
@@ -377,8 +376,8 @@ def run():
 
     # ── Monthly Summary Table ──────────────────────────────────────────────────
     st.markdown("<div class='section-header'>Monthly Summary</div>", unsafe_allow_html=True)
-    display_summary = monthly_summary[['Month_Display','admission_Id_Admissions',
-                                        'admission_Id_Discharges','Monthly_BTR']].copy()
+    display_summary = ms_cf[['Month_Display','admission_Id_Admissions',
+                              'admission_Id_Discharges','Monthly_BTR']].copy()
     display_summary.columns = ['Month','Admissions','Discharges','Bed Turnover Rate']
     display_summary['Bed Turnover Rate'] = display_summary['Bed Turnover Rate'].round(2)
     st.dataframe(display_summary, use_container_width=True, hide_index=True)
