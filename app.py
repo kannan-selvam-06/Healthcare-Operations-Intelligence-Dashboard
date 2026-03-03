@@ -112,10 +112,47 @@ def apply_theme():
         section[data-testid="stSidebar"] .stExpander div { color:rgba(255,255,255,0.88) !important; }
         section[data-testid="stSidebar"] .stExpander textarea,
         section[data-testid="stSidebar"] .stExpander input {
-            background-color:rgba(255,255,255,0.08) !important;
-            color:#fff !important; border:1px solid rgba(255,255,255,0.2) !important; }
+            background-color:#0d1b3e !important;
+            color:#fff !important; border:1px solid rgba(255,255,255,0.25) !important; }
 
-        /* Navigation radio items */
+        /* Expander header "Add / View Notes" always visible */
+        section[data-testid="stSidebar"] details > summary,
+        section[data-testid="stSidebar"] details > summary p,
+        section[data-testid="stSidebar"] details > summary span,
+        section[data-testid="stSidebar"] details > summary svg {
+            color:rgba(255,255,255,0.88) !important;
+            fill:rgba(255,255,255,0.88) !important; }
+        /* All sidebar inputs/textareas: dark bg so white text is visible */
+        section[data-testid="stSidebar"] input,
+        section[data-testid="stSidebar"] textarea {
+            background-color:#0d1b3e !important;
+            color:#ffffff !important;
+            caret-color:#ffffff !important;
+            border:1px solid rgba(255,255,255,0.25) !important; }
+        section[data-testid="stSidebar"] input::placeholder,
+        section[data-testid="stSidebar"] textarea::placeholder {
+            color:rgba(255,255,255,0.4) !important; }
+        /* Multiselect + selectbox containers: dark bg */
+        section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+        section[data-testid="stSidebar"] [data-baseweb="base-input"],
+        section[data-testid="stSidebar"] [data-baseweb="input"] {
+            background-color:#0d1b3e !important;
+            border-color:rgba(255,255,255,0.25) !important; }
+        section[data-testid="stSidebar"] [data-baseweb="select"] *,
+        section[data-testid="stSidebar"] [data-baseweb="base-input"] * {
+            color:#ffffff !important; }
+        /* Hide the stray text cursor inside multiselect */
+        section[data-testid="stSidebar"] [data-baseweb="select"] [contenteditable],
+        section[data-testid="stSidebar"] [role="combobox"] input {
+            caret-color: transparent !important;
+            color: transparent !important;
+            width: 2px !important; }
+        /* Sidebar buttons: orange bg, white text */
+        section[data-testid="stSidebar"] .stButton > button {
+            background:rgba(249,115,22,0.9) !important;
+            color:#ffffff !important; border:none !important; }
+        section[data-testid="stSidebar"] .stButton > button * {
+            color:#ffffff !important; }
         div[role="radiogroup"] { gap:2px !important; }
         div[role="radiogroup"] > label {
             display:flex !important; align-items:center !important;
@@ -171,37 +208,16 @@ def apply_theme():
         .sb-hdr   { font-size:10px; font-weight:800; color:rgba(255,255,255,0.45);
                     margin:16px 0 8px; text-transform:uppercase; letter-spacing:1.5px; padding:0 16px; }
         .sb-div   { height:1px; background:rgba(255,255,255,0.08); margin:12px 8px; }
-        .ann-box  { 
-        background:#FFFFFF;
-        border-left:4px solid #F97316;
-        padding:8px 12px;
-        border-radius:6px;
-        margin:4px 0;
-        font-size:12px;
-        color:#1E293B;
-        line-height:1.5;
-}
+        .ann-box  { background:rgba(255,255,255,0.06); border-left:4px solid #F97316;
+                    padding:8px 12px; border-radius:6px; margin:4px 0;
+                    font-size:12px; color:rgba(255,255,255,0.85); line-height:1.5; }
         .filter-badge { display:inline-block; background:rgba(249,115,22,0.15);
             border:1px solid #F97316; color:#FDBA74 !important; border-radius:20px;
             padding:2px 10px; font-size:11px; font-weight:700; margin:2px; }
-                /* Sidebar headers stay white */
-        .sb-hdr,
-        .sb-title,
-        .sb-sub {
-            color: #FFFFFF !important;
-        }
-
-        /* Form labels inside expander (light mode) */
-        section[data-testid="stSidebar"] .stTextInput label,
-        section[data-testid="stSidebar"] .stTextArea label {
-            color: #FFFFFF !important;
-        }
-
-        /* Expander content text */
-        section[data-testid="stSidebar"] .stExpander p,
-        section[data-testid="stSidebar"] .stExpander span {
-            color: #FFFFFF !important;
-        }
+        section[data-testid="stSidebar"] label,
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] span,
+        section[data-testid="stSidebar"] div { color:rgba(255,255,255,0.85) !important; }
         header[data-testid="stHeader"] {
             background-color:#fff !important; border-bottom:1px solid #E2E8F0 !important; }
         header[data-testid="stHeader"] button svg,
@@ -214,8 +230,47 @@ def apply_theme():
         section[data-testid="stSidebar"] .stExpander div { color:rgba(255,255,255,0.85) !important; }
         section[data-testid="stSidebar"] .stExpander textarea,
         section[data-testid="stSidebar"] .stExpander input {
-            background-color:rgba(255,255,255,0.08) !important;
-            color:#fff !important; border:1px solid rgba(255,255,255,0.2) !important; }
+            background-color:#0d1b3e !important;
+            color:#fff !important; border:1px solid rgba(255,255,255,0.25) !important; }
+
+        /* Expander header "Add / View Notes" always visible */
+        section[data-testid="stSidebar"] details > summary,
+        section[data-testid="stSidebar"] details > summary p,
+        section[data-testid="stSidebar"] details > summary span,
+        section[data-testid="stSidebar"] details > summary svg {
+            color:rgba(255,255,255,0.88) !important;
+            fill:rgba(255,255,255,0.88) !important; }
+        /* All sidebar inputs/textareas: dark bg so white text is visible */
+        section[data-testid="stSidebar"] input,
+        section[data-testid="stSidebar"] textarea {
+            background-color:#0d1b3e !important;
+            color:#ffffff !important;
+            caret-color:#ffffff !important;
+            border:1px solid rgba(255,255,255,0.25) !important; }
+        section[data-testid="stSidebar"] input::placeholder,
+        section[data-testid="stSidebar"] textarea::placeholder {
+            color:rgba(255,255,255,0.4) !important; }
+        /* Multiselect + selectbox containers: dark bg */
+        section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+        section[data-testid="stSidebar"] [data-baseweb="base-input"],
+        section[data-testid="stSidebar"] [data-baseweb="input"] {
+            background-color:#0d1b3e !important;
+            border-color:rgba(255,255,255,0.25) !important; }
+        section[data-testid="stSidebar"] [data-baseweb="select"] *,
+        section[data-testid="stSidebar"] [data-baseweb="base-input"] * {
+            color:#ffffff !important; }
+        /* Hide the stray text cursor inside multiselect */
+        section[data-testid="stSidebar"] [data-baseweb="select"] [contenteditable],
+        section[data-testid="stSidebar"] [role="combobox"] input {
+            caret-color: transparent !important;
+            color: transparent !important;
+            width: 2px !important; }
+        /* Sidebar buttons: orange bg, white text */
+        section[data-testid="stSidebar"] .stButton > button {
+            background:rgba(249,115,22,0.9) !important;
+            color:#ffffff !important; border:none !important; }
+        section[data-testid="stSidebar"] .stButton > button * {
+            color:#ffffff !important; }
         div[role="radiogroup"] { gap:2px !important; }
         div[role="radiogroup"] > label {
             display:flex !important; align-items:center !important;
@@ -293,13 +348,13 @@ with st.sidebar:
     if st.session_state.auto_refresh:
         remaining = max(0, int(st.session_state.refresh_interval -
                                 (time.time() - st.session_state.last_refresh)))
-        st.caption(f"Live mode — refreshing in {remaining}s")
+        st.markdown(f"<p style='color:rgba(255,255,255,0.85);font-size:12px;margin:2px 0 4px 0;'>Live mode — refreshing in {remaining}s</p>", unsafe_allow_html=True)
         iv     = {"30 sec": 30, "1 min": 60, "2 min": 120, "5 min": 300}
         chosen = st.selectbox("Interval", list(iv.keys()), index=1,
                               key="iv_sel", label_visibility="collapsed")
         st.session_state.refresh_interval = iv[chosen]
     else:
-        st.caption("Static mode — data not auto-refreshing")
+        st.markdown("<p style='color:rgba(255,255,255,0.85);font-size:12px;margin:2px 0 4px 0;'>Static mode — data not auto-refreshing</p>", unsafe_allow_html=True)
 
     st.markdown("<div class='sb-div'></div>", unsafe_allow_html=True)
     st.markdown("<div class='sb-hdr'>Navigation</div>", unsafe_allow_html=True)

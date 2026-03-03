@@ -210,8 +210,12 @@ def build_chart(chart_id, patients, appts, bed_rec, bed_full, surg, doctors, dep
         return "Surgery Distribution by Department", fig, None
 
     if chart_id == "p3_heatmap":
-        doc_dept = doctors.merge(depts, on="dept_Id", how="left")[["doct_Id","FName","dept_Name"]]
-        hd = surg.merge(doc_dept, left_on="surgeon_Id", right_on="doct_Id", how="inner").dropna(subset=["FName","dept_Name"])
+        doc_fname = doctors[["doct_Id","FName"]].drop_duplicates()
+        hd = surg.merge(doc_fname, left_on="surgeon_Id", right_on="doct_Id", how="inner")
+        if "dept_Name" not in hd.columns:
+            doc_dept = doctors.merge(depts, on="dept_Id", how="left")[["doct_Id","dept_Name"]].drop_duplicates()
+            hd = hd.merge(doc_dept, on="doct_Id", how="left")
+        hd = hd.dropna(subset=[c for c in ["FName","dept_Name"] if c in hd.columns])
         hc = hd.groupby(["FName","dept_Name"]).size().reset_index(name="Count")
         top10 = hc.groupby("FName")["Count"].sum().nlargest(10).index
         hc  = hc[hc["FName"].isin(top10)]
@@ -249,8 +253,12 @@ def build_chart(chart_id, patients, appts, bed_rec, bed_full, surg, doctors, dep
         return "Nurse Distribution by Department", fig, None
 
     if chart_id == "p5_heatmap":
-        doc_dept = doctors.merge(depts, on="dept_Id", how="left")[["doct_Id","FName","dept_Name"]]
-        merged   = appts.merge(doc_dept, on="doct_Id", how="left").dropna(subset=["FName","dept_Name"])
+        doc_fname = doctors[["doct_Id","FName"]].drop_duplicates()
+        merged = appts.merge(doc_fname, on="doct_Id", how="left")
+        if "dept_Name" not in merged.columns:
+            doc_dept = doctors.merge(depts, on="dept_Id", how="left")[["doct_Id","dept_Name"]].drop_duplicates()
+            merged = merged.merge(doc_dept, on="doct_Id", how="left")
+        merged = merged.dropna(subset=[c for c in ["FName","dept_Name"] if c in merged.columns])
         hc       = merged.groupby(["FName","dept_Name"]).size().reset_index(name="Count")
         top10    = hc.groupby("FName")["Count"].sum().nlargest(10).index
         hc       = hc[hc["FName"].isin(top10)]
@@ -600,6 +608,14 @@ def run(filtered: dict):
             background-color:{input_bg} !important; color:{input_text} !important;
             border:1px solid {input_border} !important;
         }}
+        /* Slider labels: theme-correct color + larger font */
+        .stSlider label p, .stSelectSlider label p,
+        [data-testid="stWidgetLabel"] p,
+        [data-testid="stWidgetLabel"] span {{
+            color:{text_color} !important;
+            font-size:16px !important;
+            font-weight:700 !important;
+        }}
         /* Text area placeholder color — visible in both themes */
         .stTextArea textarea::placeholder {{
             color: {"#94A3B8" if dm else "#94A3B8"} !important;
@@ -639,12 +655,6 @@ def run(filtered: dict):
         section[data-testid="stSidebar"] .stExpander input::placeholder {{
             color: #94A3B8 !important;
             opacity: 1 !important;
-        }}
-         /* ── FIX SLIDER LABEL VISIBILITY ── */
-        div[data-testid="stSlider"] label,
-        div[data-testid="stSlider"] span {{
-            color: {text_color} !important;
-            font-weight: 700 !important;
         }}
     </style>""", unsafe_allow_html=True)
 
@@ -785,7 +795,6 @@ def run(filtered: dict):
             ("p2_age",           "Age Group Distribution"),
             ("p2_top_cities",    "Top 10 Cities by Patient Count"),
             ("p2_payment",       "Payment Methods"),
-            ("p2_appt_trend",    "Appointment Trend 2024 vs 2025"),
         ],
         "Clinical & Disease Intelligence (Page 3)": [
             ("p3_top_surgeries", "Top 10 Surgical Procedures"),

@@ -79,10 +79,11 @@ def run(filtered: dict):
             background: {card_bg}; border: 1px solid {bdr}; border-radius: 12px;
             padding: 16px 20px; margin-bottom: 24px;
         }}
-        
-        [data-baseweb="select"] input::placeholder {{
-            color: #1E293B !important;   /* Dark slate */
-            opacity: 1 !important;
+        /* FIX: multiselect widget labels in main content area — must use correct Streamlit selectors */
+        [data-testid="stWidgetLabel"] p,
+        [data-testid="stWidgetLabel"] span,
+        [data-testid="stWidgetLabel"] label {{
+            color: {text_color} !important; font-weight: 700 !important;
         }}
     </style>
     """, unsafe_allow_html=True)
